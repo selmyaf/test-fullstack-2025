@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -10,72 +11,72 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
-	"golang.org/x/net/context"
 )
 
 var ctx = context.Background()
 
 type User struct {
-	Realname string `json:"realname"`
+	Name     string `json:"name"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-func factorial(n int) int64 {
-	if n == 0 || n == 1 {
+func hitungFaktorial(n int) int64 {
+	if n <= 1 {
 		return 1
 	}
-	res := int64(1)
+	result := int64(1)
 	for i := 2; i <= n; i++ {
-		res *= int64(i)
+		result *= int64(i)
 	}
-	return res
+	return result
 }
 
-func f(n int) int64 {
-	return int64(math.Ceil(float64(factorial(n)) / math.Pow(2, float64(n))))
+func specialFunction(n int) int64 {
+	fak := hitungFaktorial(n)
+	return int64(math.Ceil(float64(fak) / math.Pow(2, float64(n))))
 }
 
 func main() {
-	fmt.Println("f(5) =", f(5)) 
-
-	rdb := redis.NewClient(&redis.Options{
+	fmt.Println("Hasil f(5) =", specialFunction(5))
+	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-
 	app := fiber.New()
-
 	app.Post("/login", func(c *fiber.Ctx) error {
-		type LoginRequest struct {
+		type LoginInput struct {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 
-		var req LoginRequest
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid request"})
+		var loginData LoginInput
+		if err := c.BodyParser(&loginData); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Request invalid"})
 		}
 
-		key := fmt.Sprintf("login_%s", req.Username)
-		val, err := rdb.Get(ctx, key).Result()
+		redisKey := fmt.Sprintf("user_%s", loginData.Username)
+		storedUserJSON, err := redisClient.Get(ctx, redisKey).Result()
 		if err != nil {
-			return c.Status(401).JSON(fiber.Map{"error": "User not found"})
+			return c.Status(404).JSON(fiber.Map{"error": "User not found"})
 		}
-		var user User
-		if err := json.Unmarshal([]byte(val), &user); err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Invalid user data"})
-		}
-		h := sha1.New()
-		h.Write([]byte(req.Password))
-		hashed := hex.EncodeToString(h.Sum(nil))
 
-		if hashed != user.Password {
-			return c.Status(401).JSON(fiber.Map{"error": "Invalid password"})
+		var storedUser User
+		if err := json.Unmarshal([]byte(storedUserJSON), &storedUser); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "User data corrupted"})
 		}
+
+		hash := sha1.New()
+		hash.Write([]byte(loginData.Password))
+		hashedPassword := hex.EncodeToString(hash.Sum(nil))
+
+		if hashedPassword != storedUser.Password {
+			return c.Status(401).JSON(fiber.Map{"error": "Password salah"})
+		}
+
 		return c.JSON(fiber.Map{
-			"message":  "Login success",
-			"realname": user.Realname,
-			"email":    user.Email,
+			"message": "Login berhasil",
+			"name":    storedUser.Name,
+			"email":   storedUser.Email,
 		})
 	})
 
